@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>릴스 대본 추출기</title>
+<style>
+  :root {
+    --bg: #0f0f12;
+    --card: #18181c;
+    --border: #2a2a30;
+    --text: #f2f2f3;
+    --muted: #9a9aa2;
+    --accent: #6c5ce7;
+    --accent-hover: #7d6ef2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 40px 16px;
+  }
+  .wrap { width: 100%; max-width: 640px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 28px; }
+
+  #urlInput {
+    width: 100%;
+    padding: 14px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    font-size: 15px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  #urlInput:focus { border-color: var(--accent); }
+  #urlInput::placeholder { color: var(--muted); }
+
+  button#submitBtn {
+    width: 100%;
+    margin-top: 16px;
+    padding: 13px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  button#submitBtn:hover { background: var(--accent-hover); }
+  button#submitBtn:disabled { background: #3a3a42; cursor: not-allowed; }
+
+  #status { margin-top: 16px; font-size: 14px; color: var(--muted); text-align: center; min-height: 20px; }
+
+  #result {
+    margin-top: 24px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    display: none;
+  }
+  #result h2 { font-size: 15px; margin: 0 0 12px 0; color: var(--muted); font-weight: 500; }
+  #resultText {
+    white-space: pre-wrap;
+    line-height: 1.7;
+    font-size: 15px;
+  }
+  #resultText p { margin: 0 0 14px 0; }
+
+  .actions { display: flex; gap: 8px; margin-top: 16px; }
+  .actions button {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .actions button:hover { border-color: var(--accent); }
+
+  .meta { margin-top: 10px; font-size: 12px; color: var(--muted); }
+
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid var(--muted);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🎬 릴스 대본 추출기</h1>
+    <div class="sub">릴스 링크를 붙여넣으면 대본(텍스트)으로 뽑아드려요.</div>
+
+    <input type="url" id="urlInput" placeholder="https://www.instagram.com/reel/..." />
+
+    <button id="submitBtn" disabled>대본 추출하기</button>
+    <div id="status"></div>
+
+    <div id="result">
+      <h2>추출된 대본</h2>
+      <div id="resultText"></div>
+      <div class="meta" id="resultMeta"></div>
+      <div class="actions">
+        <button id="copyBtn">📋 복사하기</button>
+        <button id="downloadBtn">⬇️ txt로 저장</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const urlInput = document.getElementById('urlInput');
+const submitBtn = document.getElementById('submitBtn');
+const statusEl = document.getElementById('status');
+const resultEl = document.getElementById('result');
+const resultTextEl = document.getElementById('resultText');
+const resultMetaEl = document.getElementById('resultMeta');
+const copyBtn = document.getElementById('copyBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+
+let lastFullText = '';
+
+urlInput.addEventListener('input', () => {
+  submitBtn.disabled = !urlInput.value.trim().startsWith('http');
+});
+
+submitBtn.addEventListener('click', async () => {
+  const url = urlInput.value.trim();
+  if (!url) return;
+  submitBtn.disabled = true;
+  statusEl.innerHTML = '<span class="spinner"></span>영상을 가져와서 대본을 추출하는 중... (시간이 좀 걸려요)';
+  resultEl.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `서버 오류 (${res.status})`);
+    }
+    const data = await res.json();
+
+    if (!data.paragraphs || data.paragraphs.length === 0) {
+      statusEl.textContent = data.warning || '음성을 인식하지 못했어요.';
+      submitBtn.disabled = false;
+      return;
+    }
+
+    lastFullText = data.full_text;
+    resultTextEl.innerHTML = data.paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('');
+    resultMetaEl.textContent = `영상 길이 ${Math.round(data.duration_sec)}초 · 처리 시간 ${data.processing_sec}초`;
+    resultEl.style.display = 'block';
+    statusEl.textContent = '완료!';
+  } catch (e) {
+    statusEl.textContent = `오류: ${e.message}`;
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+
+copyBtn.addEventListener('click', () => {
+  navigator.clipboard.writeText(lastFullText);
+  copyBtn.textContent = '복사됨!';
+  setTimeout(() => copyBtn.textContent = '📋 복사하기', 1500);
+});
+
+downloadBtn.addEventListener('click', () => {
+  const blob = new Blob([lastFullText], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'script.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>
