@@ -61,3 +61,23 @@ uvicorn main:app --reload
 - **비공개 계정/비공개 게시물** 링크는 로그인이 필요해서 yt-dlp가 못 가져올 수 있어요. 공개 릴스 위주로 사용하세요.
 - 인스타그램이 자동화된 요청을 감지하면 일시적으로 다운로드가 막힐 수 있어요 (너무 짧은 시간에 반복 요청하지 않는 게 좋아요). `yt-dlp`는 계속 업데이트되는 도구라, 안 될 경우 `pip install -U yt-dlp`로 최신 버전으로 올려보세요.
 - 저작권이 있는 타인의 릴스를 대량으로 대본화해서 재배포하는 용도가 아니라, 본인 콘텐츠 벤치마킹/스크립트 참고용으로 쓰시는 걸 권장해요.
+
+## 5. 서버 없이 무료로 계속 쓰기
+
+### 데스크톱 앱 (Windows/Mac)
+
+`desktop/` 폴더에 서버 없이 내 컴퓨터에서 바로 돌아가는 버전이 있어요. `.github/workflows/build-desktop.yml`이
+GitHub Actions에서 Windows(.exe)/Mac 빌드를 자동으로 만들어 저장소의 Actions 탭 → 최신 실행 → Artifacts에서
+내려받을 수 있어요. 직접 빌드하려면:
+
+```bash
+cd desktop
+pip install -r requirements.txt
+python desktop_app.py          # 실행만 해보기
+pyinstaller --name "reels-transcript-extractor" --onefile --windowed desktop_app.py   # exe로 패키징
+```
+
+### 모바일 (PWA)
+
+`static/`에 manifest.json / service-worker.js를 추가해서, 서버(Render 등)에 배포된 주소를 모바일 브라우저로 열고
+"홈 화면에 추가"하면 앱처럼 아이콘이 생기고 실행돼요. (음성 인식 자체는 서버에서 처리하므로 서버는 계속 떠 있어야 함)

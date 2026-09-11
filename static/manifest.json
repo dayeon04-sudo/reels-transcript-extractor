@@ -1,0 +1,14 @@
+{
+  "name": "릴스 대본 추출기",
+  "short_name": "대본추출기",
+  "description": "릴스/쇼츠 링크를 붙여넣으면 대본(텍스트)으로 뽑아드려요.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f0f12",
+  "theme_color": "#6c5ce7",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

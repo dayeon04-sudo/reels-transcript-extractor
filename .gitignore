@@ -3,3 +3,8 @@ __pycache__/
 .venv/
 venv/
 .env
+desktop/build/
+desktop/dist/
+desktop/*.spec
+desktop/run_out.log
+desktop/run_err.log

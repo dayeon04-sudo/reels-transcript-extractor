@@ -4,6 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>릴스 대본 추출기</title>
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#6c5ce7" />
+<link rel="icon" href="/static/icons/icon-192.png" />
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="대본추출기" />
 <style>
   :root {
     --bg: #0f0f12;
@@ -199,6 +206,12 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+  });
 }
 </script>
 </body>

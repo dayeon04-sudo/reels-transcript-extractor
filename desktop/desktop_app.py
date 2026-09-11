@@ -1,0 +1,194 @@
+"""릴스 대본 추출기 - 데스크톱 앱 (Windows/Mac 공용)
+
+로컬에서 실행되는 tkinter GUI. 서버 없이 내 컴퓨터에서
+yt-dlp(다운로드) -> ffmpeg(오디오 추출) -> faster-whisper(STT) 파이프라인을 직접 돌린다.
+"""
+
+import os
+import subprocess
+import tempfile
+import threading
+import traceback
+from pathlib import Path
+
+import tkinter as tk
+from tkinter import scrolledtext, messagebox, filedialog
+
+import imageio_ffmpeg
+import yt_dlp
+
+MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "small")
+PARAGRAPH_GAP_SECONDS = 1.2
+MAX_DOWNLOAD_MB = 300
+
+_model = None
+_model_lock = threading.Lock()
+
+
+def get_model():
+    global _model
+    with _model_lock:
+        if _model is None:
+            from faster_whisper import WhisperModel
+            _model = WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8")
+    return _model
+
+
+def download_video(url: str, out_dir: str) -> str:
+    ydl_opts = {
+        "format": f"bestvideo[filesize<{MAX_DOWNLOAD_MB}M]+bestaudio/best[filesize<{MAX_DOWNLOAD_MB}M]/best",
+        "outtmpl": os.path.join(out_dir, "input.%(ext)s"),
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+
+    matches = list(Path(out_dir).glob("input.*"))
+    if not matches:
+        raise RuntimeError("다운로드된 파일을 찾을 수 없습니다.")
+    return str(matches[0])
+
+
+def extract_audio(video_path: str, audio_path: str) -> None:
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    cmd = [
+        ffmpeg_exe, "-y", "-i", video_path,
+        "-vn", "-ac", "1", "-ar", "16000",
+        "-loglevel", "error",
+        audio_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg 오디오 추출 실패: {result.stderr}")
+
+
+def group_into_paragraphs(segments, gap_seconds: float):
+    paragraphs = []
+    current = []
+    prev_end = None
+    for seg in segments:
+        if prev_end is not None and (seg["start"] - prev_end) > gap_seconds and current:
+            paragraphs.append(" ".join(current).strip())
+            current = []
+        current.append(seg["text"].strip())
+        prev_end = seg["end"]
+    if current:
+        paragraphs.append(" ".join(current).strip())
+    return paragraphs
+
+
+def transcribe_url(url: str, on_status):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        on_status("영상 다운로드 중...")
+        video_path = download_video(url, tmp_dir)
+
+        on_status("오디오 추출 중...")
+        audio_path = os.path.join(tmp_dir, "audio.wav")
+        extract_audio(video_path, audio_path)
+
+        on_status("모델 로딩 중... (처음 실행 시 다소 걸릴 수 있어요)")
+        model = get_model()
+
+        on_status("음성 인식 중...")
+        segments_gen, _info = model.transcribe(audio_path, language="ko", vad_filter=True)
+        segments = [{"start": s.start, "end": s.end, "text": s.text} for s in segments_gen]
+
+        if not segments:
+            return "", []
+
+        paragraphs = group_into_paragraphs(segments, PARAGRAPH_GAP_SECONDS)
+        full_text = " ".join(seg["text"].strip() for seg in segments)
+        return full_text, paragraphs
+
+
+class App(tk.Tk):
+    BG = "#0f0f12"
+    CARD = "#18181c"
+    TEXT = "#f2f2f3"
+    MUTED = "#9a9aa2"
+    ACCENT = "#6c5ce7"
+
+    def __init__(self):
+        super().__init__()
+        self.title("릴스 대본 추출기")
+        self.geometry("640x580")
+        self.configure(bg=self.BG)
+        self.full_text = ""
+        self._build_ui()
+
+    def _build_ui(self):
+        tk.Label(self, text="🎬 릴스 대본 추출기", font=("Segoe UI", 16, "bold"),
+                 bg=self.BG, fg=self.TEXT).pack(anchor="w", padx=16, pady=(16, 0))
+        tk.Label(self, text="릴스/쇼츠 링크를 붙여넣으면 대본(텍스트)으로 뽑아드려요.",
+                 bg=self.BG, fg=self.MUTED).pack(anchor="w", padx=16, pady=(0, 12))
+
+        self.url_entry = tk.Entry(self, font=("Segoe UI", 11))
+        self.url_entry.pack(fill="x", padx=16, ipady=6)
+        self.url_entry.bind("<Return>", lambda _e: self.on_submit())
+
+        self.submit_btn = tk.Button(self, text="대본 추출하기", command=self.on_submit,
+                                     bg=self.ACCENT, fg="white", relief="flat", cursor="hand2")
+        self.submit_btn.pack(fill="x", padx=16, pady=8, ipady=8)
+
+        self.status_label = tk.Label(self, text="", bg=self.BG, fg=self.MUTED)
+        self.status_label.pack(anchor="w", padx=16)
+
+        self.result_text = scrolledtext.ScrolledText(self, wrap="word", font=("Segoe UI", 11),
+                                                       bg=self.CARD, fg=self.TEXT, relief="flat")
+        self.result_text.pack(fill="both", expand=True, padx=16, pady=8)
+
+        btn_frame = tk.Frame(self, bg=self.BG)
+        btn_frame.pack(fill="x", padx=16, pady=(0, 16))
+        tk.Button(btn_frame, text="복사하기", command=self.on_copy
+                  ).pack(side="left", expand=True, fill="x", padx=(0, 4), ipady=4)
+        tk.Button(btn_frame, text="txt로 저장", command=self.on_save
+                  ).pack(side="left", expand=True, fill="x", padx=(4, 0), ipady=4)
+
+    def on_submit(self):
+        url = self.url_entry.get().strip()
+        if not url.startswith("http"):
+            messagebox.showwarning("알림", "올바른 링크를 입력해주세요.")
+            return
+        self.submit_btn.config(state="disabled")
+        self.result_text.delete("1.0", "end")
+        threading.Thread(target=self._run_transcribe, args=(url,), daemon=True).start()
+
+    def _run_transcribe(self, url):
+        def on_status(msg):
+            self.after(0, lambda: self.status_label.config(text=msg))
+
+        try:
+            full_text, paragraphs = transcribe_url(url, on_status)
+            self.full_text = full_text
+            if not paragraphs:
+                self.after(0, lambda: self.status_label.config(text="음성을 인식하지 못했어요."))
+            else:
+                text = "\n\n".join(paragraphs)
+                self.after(0, lambda: self._show_result(text))
+        except Exception as e:
+            traceback.print_exc()
+            msg = str(e)
+            self.after(0, lambda: self.status_label.config(text=f"오류: {msg}"))
+        finally:
+            self.after(0, lambda: self.submit_btn.config(state="normal"))
+
+    def _show_result(self, text):
+        self.result_text.insert("1.0", text)
+        self.status_label.config(text="완료!")
+
+    def on_copy(self):
+        self.clipboard_clear()
+        self.clipboard_append(self.full_text)
+        self.status_label.config(text="클립보드에 복사됨!")
+
+    def on_save(self):
+        path = filedialog.asksaveasfilename(defaultextension=".txt", initialfile="script.txt")
+        if path:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self.full_text)
+
+
+if __name__ == "__main__":
+    App().mainloop()

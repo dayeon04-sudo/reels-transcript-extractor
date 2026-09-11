@@ -108,6 +108,17 @@ def serve_index():
     return FileResponse(Path(__file__).parent / "static" / "index.html")
 
 
+@app.get("/manifest.json")
+def serve_manifest():
+    return FileResponse(Path(__file__).parent / "static" / "manifest.json")
+
+
+@app.get("/service-worker.js")
+def serve_service_worker():
+    # 정적 파일이지만 scope가 "/" 전체를 덮도록 /static/ 밖(루트)에서 서빙
+    return FileResponse(Path(__file__).parent / "static" / "service-worker.js", media_type="application/javascript")
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "model_size": MODEL_SIZE}
