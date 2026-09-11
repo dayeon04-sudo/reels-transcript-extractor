@@ -43,7 +43,7 @@ def get_model():
     return _model
 
 
-def download_video(url: str, out_dir: str, browser: str | None = None) -> str:
+def download_video(url: str, out_dir: str, browser: str | None = None, cookie_file: str | None = None) -> str:
     ydl_opts = {
         "format": f"bestvideo[filesize<{MAX_DOWNLOAD_MB}M]+bestaudio/best[filesize<{MAX_DOWNLOAD_MB}M]/best",
         "outtmpl": os.path.join(out_dir, "input.%(ext)s"),
@@ -51,7 +51,11 @@ def download_video(url: str, out_dir: str, browser: str | None = None) -> str:
         "quiet": True,
         "no_warnings": True,
     }
-    if browser:
+    # cookies.txt 파일이 있으면 그걸 우선 사용 (브라우저가 켜져 있을 때 쿠키 DB가 잠겨서
+    # cookiesfrombrowser가 실패하는 경우가 많아, 파일 방식이 더 안정적임)
+    if cookie_file:
+        ydl_opts["cookiefile"] = cookie_file
+    elif browser:
         ydl_opts["cookiesfrombrowser"] = (browser,)
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
@@ -90,10 +94,10 @@ def group_into_paragraphs(segments, gap_seconds: float):
     return paragraphs
 
 
-def transcribe_url(url: str, on_status, browser: str | None = None):
+def transcribe_url(url: str, on_status, browser: str | None = None, cookie_file: str | None = None):
     with tempfile.TemporaryDirectory() as tmp_dir:
         on_status("영상 다운로드 중...")
-        video_path = download_video(url, tmp_dir, browser)
+        video_path = download_video(url, tmp_dir, browser, cookie_file)
 
         on_status("오디오 추출 중...")
         audio_path = os.path.join(tmp_dir, "audio.wav")
@@ -141,12 +145,22 @@ class App(tk.Tk):
 
         browser_frame = tk.Frame(self, bg=self.BG)
         browser_frame.pack(fill="x", padx=16, pady=(8, 0))
-        tk.Label(browser_frame, text="비공개/차단된 링크일 때 브라우저 로그인 사용:",
+        tk.Label(browser_frame, text="브라우저 로그인 자동 사용(켜져 있으면 실패할 수 있음):",
                  bg=self.BG, fg=self.MUTED, font=("Segoe UI", 9)).pack(side="left")
-        self.browser_var = tk.StringVar(value="Chrome")
+        self.browser_var = tk.StringVar(value="사용 안 함")
         self.browser_combo = ttk.Combobox(browser_frame, textvariable=self.browser_var,
                                            values=list(BROWSER_CHOICES.keys()), state="readonly", width=10)
         self.browser_combo.pack(side="left", padx=(8, 0))
+
+        cookie_frame = tk.Frame(self, bg=self.BG)
+        cookie_frame.pack(fill="x", padx=16, pady=(4, 0))
+        tk.Label(cookie_frame, text="또는 cookies.txt 파일(권장, 더 안정적):",
+                 bg=self.BG, fg=self.MUTED, font=("Segoe UI", 9)).pack(side="left")
+        self.cookie_file_var = tk.StringVar(value="")
+        tk.Label(cookie_frame, textvariable=self.cookie_file_var, bg=self.BG, fg=self.TEXT,
+                 font=("Segoe UI", 9)).pack(side="left", padx=(8, 0))
+        tk.Button(cookie_frame, text="찾아보기", command=self.on_pick_cookie_file
+                  ).pack(side="right")
 
         self.submit_btn = tk.Button(self, text="대본 추출하기", command=self.on_submit,
                                      bg=self.ACCENT, fg="white", relief="flat", cursor="hand2")
@@ -174,14 +188,20 @@ class App(tk.Tk):
         self.submit_btn.config(state="disabled")
         self.result_text.delete("1.0", "end")
         browser = BROWSER_CHOICES.get(self.browser_var.get())
-        threading.Thread(target=self._run_transcribe, args=(url, browser), daemon=True).start()
+        cookie_file = self.cookie_file_var.get().strip() or None
+        threading.Thread(target=self._run_transcribe, args=(url, browser, cookie_file), daemon=True).start()
 
-    def _run_transcribe(self, url, browser):
+    def on_pick_cookie_file(self):
+        path = filedialog.askopenfilename(filetypes=[("cookies.txt", "*.txt"), ("모든 파일", "*.*")])
+        if path:
+            self.cookie_file_var.set(path)
+
+    def _run_transcribe(self, url, browser, cookie_file):
         def on_status(msg):
             self.after(0, lambda: self.status_label.config(text=msg))
 
         try:
-            full_text, paragraphs = transcribe_url(url, on_status, browser)
+            full_text, paragraphs = transcribe_url(url, on_status, browser, cookie_file)
             self.full_text = full_text
             if not paragraphs:
                 self.after(0, lambda: self.status_label.config(text="음성을 인식하지 못했어요."))
