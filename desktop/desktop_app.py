@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 
 import tkinter as tk
-from tkinter import scrolledtext, messagebox, filedialog
+from tkinter import scrolledtext, messagebox, filedialog, ttk
 
 import imageio_ffmpeg
 import yt_dlp
@@ -20,6 +20,15 @@ import yt_dlp
 MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "small")
 PARAGRAPH_GAP_SECONDS = 1.2
 MAX_DOWNLOAD_MB = 300
+
+# 인스타그램 등이 로그인 안 된 요청을 막을 때, 브라우저에 로그인된 쿠키를 빌려 쓰기 위한 선택지
+BROWSER_CHOICES = {
+    "사용 안 함": None,
+    "Chrome": "chrome",
+    "Edge": "edge",
+    "Whale": "whale",
+    "Firefox": "firefox",
+}
 
 _model = None
 _model_lock = threading.Lock()
@@ -34,7 +43,7 @@ def get_model():
     return _model
 
 
-def download_video(url: str, out_dir: str) -> str:
+def download_video(url: str, out_dir: str, browser: str | None = None) -> str:
     ydl_opts = {
         "format": f"bestvideo[filesize<{MAX_DOWNLOAD_MB}M]+bestaudio/best[filesize<{MAX_DOWNLOAD_MB}M]/best",
         "outtmpl": os.path.join(out_dir, "input.%(ext)s"),
@@ -42,6 +51,8 @@ def download_video(url: str, out_dir: str) -> str:
         "quiet": True,
         "no_warnings": True,
     }
+    if browser:
+        ydl_opts["cookiesfrombrowser"] = (browser,)
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
 
@@ -79,10 +90,10 @@ def group_into_paragraphs(segments, gap_seconds: float):
     return paragraphs
 
 
-def transcribe_url(url: str, on_status):
+def transcribe_url(url: str, on_status, browser: str | None = None):
     with tempfile.TemporaryDirectory() as tmp_dir:
         on_status("영상 다운로드 중...")
-        video_path = download_video(url, tmp_dir)
+        video_path = download_video(url, tmp_dir, browser)
 
         on_status("오디오 추출 중...")
         audio_path = os.path.join(tmp_dir, "audio.wav")
@@ -128,6 +139,15 @@ class App(tk.Tk):
         self.url_entry.pack(fill="x", padx=16, ipady=6)
         self.url_entry.bind("<Return>", lambda _e: self.on_submit())
 
+        browser_frame = tk.Frame(self, bg=self.BG)
+        browser_frame.pack(fill="x", padx=16, pady=(8, 0))
+        tk.Label(browser_frame, text="비공개/차단된 링크일 때 브라우저 로그인 사용:",
+                 bg=self.BG, fg=self.MUTED, font=("Segoe UI", 9)).pack(side="left")
+        self.browser_var = tk.StringVar(value="Chrome")
+        self.browser_combo = ttk.Combobox(browser_frame, textvariable=self.browser_var,
+                                           values=list(BROWSER_CHOICES.keys()), state="readonly", width=10)
+        self.browser_combo.pack(side="left", padx=(8, 0))
+
         self.submit_btn = tk.Button(self, text="대본 추출하기", command=self.on_submit,
                                      bg=self.ACCENT, fg="white", relief="flat", cursor="hand2")
         self.submit_btn.pack(fill="x", padx=16, pady=8, ipady=8)
@@ -153,14 +173,15 @@ class App(tk.Tk):
             return
         self.submit_btn.config(state="disabled")
         self.result_text.delete("1.0", "end")
-        threading.Thread(target=self._run_transcribe, args=(url,), daemon=True).start()
+        browser = BROWSER_CHOICES.get(self.browser_var.get())
+        threading.Thread(target=self._run_transcribe, args=(url, browser), daemon=True).start()
 
-    def _run_transcribe(self, url):
+    def _run_transcribe(self, url, browser):
         def on_status(msg):
             self.after(0, lambda: self.status_label.config(text=msg))
 
         try:
-            full_text, paragraphs = transcribe_url(url, on_status)
+            full_text, paragraphs = transcribe_url(url, on_status, browser)
             self.full_text = full_text
             if not paragraphs:
                 self.after(0, lambda: self.status_label.config(text="음성을 인식하지 못했어요."))
