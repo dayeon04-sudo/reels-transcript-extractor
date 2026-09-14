@@ -4,6 +4,7 @@
 yt-dlp(다운로드) -> ffmpeg(오디오 추출) -> faster-whisper(STT) 파이프라인을 직접 돌린다.
 """
 
+import multiprocessing
 import os
 import subprocess
 import tempfile
@@ -232,4 +233,5 @@ class App(tk.Tk):
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     App().mainloop()

@@ -74,7 +74,7 @@ GitHub Actions에서 Windows(.exe)/Mac 빌드를 자동으로 만들어 저장�
 cd desktop
 pip install -r requirements.txt
 python desktop_app.py          # 실행만 해보기
-pyinstaller --name "reels-transcript-extractor" --onefile --windowed desktop_app.py   # exe로 패키징
+pyinstaller --name "reels-transcript-extractor" --onedir --windowed --collect-submodules numpy --collect-data faster_whisper desktop_app.py   # 폴더+exe로 패키징
 ```
 
 ### 모바일 (PWA)
