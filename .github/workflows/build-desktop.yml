@@ -8,16 +8,12 @@ on:
       - ".github/workflows/build-desktop.yml"
   workflow_dispatch: {}
 
+env:
+  PYINSTALLER_ARGS: --name reels-transcript-extractor --onedir --windowed --clean --collect-submodules numpy --collect-data faster_whisper desktop_app.py
+
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            artifact: reels-transcript-extractor-windows
-          - os: macos-latest
-            artifact: reels-transcript-extractor-macos
-    runs-on: ${{ matrix.os }}
+  windows:
+    runs-on: windows-latest
     defaults:
       run:
         working-directory: desktop
@@ -34,10 +30,71 @@ jobs:
           pip install -r requirements.txt
 
       - name: Build
-        run: pyinstaller --name "reels-transcript-extractor" --onedir --windowed --clean --collect-submodules numpy --collect-data faster_whisper desktop_app.py
+        run: pyinstaller ${{ env.PYINSTALLER_ARGS }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: |
-            desktop/dist/*
+          name: reels-transcript-extractor-windows
+          path: desktop/dist/*
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: apple-silicon
+          - runner: macos-15-intel
+            arch: intel
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build
+        run: pyinstaller ${{ env.PYINSTALLER_ARGS }}
+
+      - name: Ad-hoc sign (only if PyInstaller's own signature is not valid)
+        run: |
+          APP=dist/reels-transcript-extractor.app
+          if ! codesign --verify --deep --strict "$APP"; then
+            codesign --force --deep --sign - "$APP"
+            codesign --verify --deep --strict --verbose=2 "$APP"
+          fi
+
+      # upload-artifact와 Windows 압축은 실행 권한/심볼릭 링크/서명을 날려서 맥에서 앱이 안 열림.
+      # 그래서 맥 안에서 ditto로 압축한 zip 한 개만 올린다.
+      - name: Zip with ditto
+        run: ditto -c -k --sequesterRsrc --keepParent dist/reels-transcript-extractor.app reels-transcript-extractor-macos-${{ matrix.arch }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reels-transcript-extractor-macos-${{ matrix.arch }}
+          path: desktop/reels-transcript-extractor-macos-${{ matrix.arch }}.zip
+
+      - name: Smoke test (unzip the shipped zip and launch it)
+        run: |
+          rm -rf /tmp/smoke && mkdir /tmp/smoke
+          ditto -x -k reels-transcript-extractor-macos-${{ matrix.arch }}.zip /tmp/smoke
+          /tmp/smoke/reels-transcript-extractor.app/Contents/MacOS/reels-transcript-extractor > /tmp/smoke/out.log 2>&1 &
+          PID=$!
+          sleep 12
+          if kill -0 $PID 2>/dev/null; then
+            echo "app still running after 12s"
+            kill $PID
+          else
+            echo "app exited early:"
+            cat /tmp/smoke/out.log
+            exit 1
+          fi

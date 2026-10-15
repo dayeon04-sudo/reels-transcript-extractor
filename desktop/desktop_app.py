@@ -8,6 +8,7 @@ import json
 import multiprocessing
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import traceback
@@ -24,6 +25,7 @@ import yt_dlp
 MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "small")
 PARAGRAPH_GAP_SECONDS = 1.2
 MAX_DOWNLOAD_MB = 300
+IS_MAC = sys.platform == "darwin"
 
 # 추출 기록(내 컴퓨터에만 저장, 외부로 전송되지 않음)
 HISTORY_DIR = Path.home() / "릴스대본추출기_기록"
@@ -165,7 +167,7 @@ class App(tk.Tk):
         self._build_ui()
 
     def _build_ui(self):
-        tk.Label(self, text="🎬 릴스 대본 추출기", font=("Segoe UI", 16, "bold"),
+        tk.Label(self, text=("" if IS_MAC else "🎬 ") + "릴스 대본 추출기", font=("Segoe UI", 16, "bold"),
                  bg=self.BG, fg=self.TEXT).pack(anchor="w", padx=16, pady=(16, 0))
         tk.Label(self, text="릴스/쇼츠 링크를 붙여넣으면 대본(텍스트)으로 뽑아드려요.",
                  bg=self.BG, fg=self.MUTED).pack(anchor="w", padx=16, pady=(0, 12))
@@ -193,8 +195,10 @@ class App(tk.Tk):
         tk.Button(cookie_frame, text="찾아보기", command=self.on_pick_cookie_file
                   ).pack(side="right")
 
+        # macOS의 tk.Button은 bg/fg를 무시하고 흰 배경으로 그려서, 흰 글씨가 안 보이게 됨
+        btn_style = {} if IS_MAC else {"bg": self.ACCENT, "fg": "white", "relief": "flat"}
         self.submit_btn = tk.Button(self, text="대본 추출하기", command=self.on_submit,
-                                     bg=self.ACCENT, fg="white", relief="flat", cursor="hand2")
+                                     cursor="hand2", **btn_style)
         self.submit_btn.pack(fill="x", padx=16, pady=8, ipady=8)
 
         self.status_label = tk.Label(self, text="", bg=self.BG, fg=self.MUTED)
